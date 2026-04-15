@@ -1,7 +1,6 @@
 import streamlit as st
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import numpy as np
-import cv2
 import io
 import time
 
@@ -252,9 +251,6 @@ with st.sidebar:
 
     st.markdown("<div style='margin-top:1.2rem;font-size:.65rem;color:#6b6b85'>Detects: people, cars, animals, furniture, food, electronics, and 74 more COCO categories.</div>", unsafe_allow_html=True)
 
-    st.markdown("---")
-    st.markdown("<div style='font-size:.6rem;color:#6b6b85;text-align:center'>Built with Streamlit · Ultralytics YOLOv8 · OpenCV</div>", unsafe_allow_html=True)
-
 # --- Main area ----------------------------------------------------------------
 
 # Hero
@@ -326,8 +322,16 @@ result  = results[0]
 boxes   = result.boxes
 n_dets  = len(boxes)
 
-# -- Annotate image --
-annotated = img_array.copy()
+# -- Annotate image WITH PIL (No OpenCV needed) --
+annotated_pil = pil_image.copy()
+draw = ImageDraw.Draw(annotated_pil)
+
+# Load default font for drawing text
+try:
+    font = ImageFont.truetype("arial.ttf", 16)
+except IOError:
+    font = ImageFont.load_default()
+
 colors_cache = {}
 def class_color(cls_id):
     if cls_id not in colors_cache:
@@ -342,14 +346,22 @@ for box in boxes:
     label = model.names[cls_id]
     color = class_color(cls_id)
 
-    cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+    # Draw bounding box
+    draw.rectangle([x1, y1, x2, y2], outline=color, width=3)
+    
+    # Draw label tag
     tag = f"{label} {conf:.0%}"
-    (tw, th), _ = cv2.getTextSize(tag, cv2.FONT_HERSHEY_DUPLEX, 0.5, 1)
-    cv2.rectangle(annotated, (x1, y1 - th - 8), (x1 + tw + 8, y1), color, -1)
-    cv2.putText(annotated, tag, (x1 + 4, y1 - 4),
-                cv2.FONT_HERSHEY_DUPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-
-annotated_pil = Image.fromarray(annotated)
+    
+    # Handle text size dynamically
+    if hasattr(font, "getbbox"):
+        bbox = font.getbbox(tag)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+    else:
+        text_width, text_height = draw.textsize(tag, font=font)
+        
+    draw.rectangle([x1, y1 - text_height - 6, x1 + text_width + 8, y1], fill=color)
+    draw.text((x1 + 4, y1 - text_height - 4), tag, fill=(255, 255, 255), font=font)
 
 with col_result:
     st.markdown("<div class='sec-label'>Annotated Result</div>", unsafe_allow_html=True)
@@ -395,7 +407,6 @@ if n_dets == 0:
 else:
     st.markdown("<div class='sec-label'>Detection Details</div>", unsafe_allow_html=True)
 
-    # Sort by confidence desc
     det_list = sorted([
         (model.names[int(b.cls[0])], float(b.conf[0]),
          list(map(int, b.xyxy[0].tolist())), int(b.cls[0]))
